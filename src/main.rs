@@ -1,6 +1,6 @@
 extern crate clap;
 
-use std::io::{Write, Read};
+use std::io::{Write, Read, BufReader};
 use std::fs::{File, OpenOptions};
 use std::path::Path;
 
@@ -67,7 +67,7 @@ fn main() {
                   .help("Input file to convert")
                   .short("i")
                   .long("input")
-                  .required(true)
+                  .required(false)
                   .multiple(false)
                   .empty_values(false))
         .arg(Arg::with_name("OUTFILE")
@@ -215,8 +215,19 @@ fn decode<R: Read, W: Write>(mut input: R,
 
 
 fn run(matches: ArgMatches) {
-    let filename = matches.value_of("FILE").unwrap().to_string();
-    check_file(&filename);
+    let mut input;
+    if matches.is_present("FILE") {
+        let filename = matches.value_of("FILE").unwrap().to_string();
+        check_file(&filename);
+
+        let input_file = OpenOptions::new()
+                           .read(true)
+                           .open(filename)
+                           .expect("Could not open input file!");
+        input = BufReader::new(input_file);
+    } else {
+        input = BufReader::new(std::io::stdin());
+    }
 
     let outfilename = matches.value_of("OUTFILE").unwrap();
 
@@ -260,11 +271,6 @@ fn run(matches: ArgMatches) {
         Prefixed::NoPrefix
     };
 
-    let mut input_file = OpenOptions::new()
-                           .read(true)
-                           .open(filename)
-                           .expect("Could not open input file!");
-
     let mut output_file = OpenOptions::new()
                             .write(true)
                             .create(true)
@@ -275,11 +281,11 @@ fn run(matches: ArgMatches) {
 
     match mode {
         Mode::Hex => {
-            decode(input_file, output_file, width, word_width, case, prefix, sep);
+            decode(input, output_file, width, word_width, case, prefix, sep);
         }
 
         Mode::Bin => {
-            encode(input_file, output_file);
+            encode(input, output_file);
         }
     }
 }
