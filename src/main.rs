@@ -1,7 +1,7 @@
 extern crate clap;
 
 use std::io::{Write, Read};
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::path::Path;
 
 use clap::{App, Arg, ArgMatches};
@@ -13,10 +13,30 @@ enum LineWidth {
     Unlimited,
 }
 
+impl LineWidth {
+    pub fn is_end_of_line(&self, pos: usize) -> bool {
+        match self {
+            LineWidth::Width(chars_in_line) => pos == *chars_in_line,
+
+            LineWidth::Unlimited => false,
+        }
+    }
+}
+
 #[derive(Copy, Clone, PartialEq)]
 enum WordWidth {
     Chars(usize),
     Unlimited,
+}
+
+impl WordWidth {
+    pub fn is_end_of_word(&self, pos: usize) -> bool {
+        match self {
+            WordWidth::Chars(chars_in_word) => (pos % *chars_in_word) == 0,
+
+            WordWidth::Unlimited => false,
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq)]
@@ -67,13 +87,21 @@ fn main() {
                   .short("r")
                   .long("row-width")
                   .required(false)
-                  .multiple(false))
+                  .multiple(false)
+                  .empty_values(false))
         .arg(Arg::with_name("WORDWIDTH")
                   .help("Number of bytes to decode between separators on a line. Defaults to no separators.")
                   .short("w")
                   .long("word-width")
                   .required(false)
-                  .multiple(false))
+                  .multiple(false)
+                  .empty_values(false))
+        .arg(Arg::with_name("SEPARATOR")
+                  .help("String separator between words")
+                  .short("s")
+                  .long("sep")
+                  .default_value(" ")
+                  .required(false))
         .arg(Arg::with_name("LOWER")
                   .help("Print hex in lowercase (default is UPPERCASE)")
                   .short("l")
@@ -102,7 +130,7 @@ fn hexchar_to_byte(hex_char: char) -> u8 {
     if hex_char.is_ascii_digit() {
         hex_char as u8 - '0' as u8
     } else {
-        hex_char.to_ascii_lowercase() as u8 - 'a' as u8
+        hex_char.to_ascii_lowercase() as u8 - 'a' as u8 + 10
     }
 }
 
@@ -117,13 +145,17 @@ fn encode<R: Read, W: Write>(mut input: R, mut output: W) {
 
     let mut next_index = 0;
 
-    while let Ok(_) = input.read(&mut byte) {
+    while let Ok(bytes) = input.read(&mut byte) {
+        if bytes != 1 {
+            break;
+        }
+
         let chr = byte[0] as char;
         if chr.is_ascii_hexdigit() {
             hex_pair[next_index] = chr;
             next_index = (next_index + 1) % 2;
 
-            if hex_pair.len() == 2 {
+            if (next_index % 2) == 0 {
                 byte[0] = hex_to_byte(hex_pair);
                 output.write(&mut byte);
             }
@@ -135,56 +167,48 @@ fn encode<R: Read, W: Write>(mut input: R, mut output: W) {
     }
 }
 
-fn decode<R: Read, W: Write>(mut input: R, mut output: W, line_width: LineWidth, word_width: WordWidth, case: Case, prefix: Prefixed) {
+fn decode<R: Read, W: Write>(mut input: R,
+                             mut output: W,
+                             line_width: LineWidth,
+                             word_width: WordWidth,
+                             case: Case,
+                             prefix: Prefixed,
+                             sep: &str) {
     let mut chars_written: usize = 0;
     let mut chars_in_line: usize = 0;
 
     let mut byte: [u8; 1] = [0; 1];
 
-    while let Ok(_) = input.read(&mut byte) {
-        match word_width {
-            WordWidth::Chars(word_length) => {
-                match line_width {
-                    LineWidth::Width(num_line_chars) => {
-                        if chars_written % num_line_chars != 0 && chars_written % word_length == 0 {
-                            output.write_all(b" ");
+    while let Ok(num_bytes_read) = input.read(&mut byte) {
+        if num_bytes_read != 1 {
+            break;
+        }
 
-                            if prefix == Prefixed::HexPrefix {
-                                output.write_all(b"0x").unwrap();
-                            }
-                        }
-                    }
+        if word_width.is_end_of_word(chars_in_line) && !(chars_in_line == 0) {
+            output.write_all(sep.as_bytes());
+        }
 
-                  _ => {},
-                }
-            }
-              
-          _ => {},
+        if (word_width.is_end_of_word(chars_in_line) || chars_in_line == 0) &&
+           prefix == Prefixed::HexPrefix {
+            output.write_all(b"0x").unwrap();
         }
 
         match case {
             Case::Lower => {
-                output.write_all(&format!("{:X}", byte[0]).as_bytes()).unwrap();
+                output.write_all(&format!("{:02X}", byte[0]).as_bytes()).unwrap();
             },
 
             Case::Upper => {
-                println!("{:x}", byte[0]);
-                output.write_all(&format!("{:x}", byte[0]).as_bytes()).unwrap();
+                output.write_all(&format!("{:02x}", byte[0]).as_bytes()).unwrap();
             },
         }
         chars_written += 1;
         chars_in_line += 1;
 
 
-        match line_width {
-            LineWidth::Width(num_chars) => {
-                if num_chars == chars_in_line {
-                    output.write_all(b"\n");
-                    chars_in_line = 0;
-                }
-            }
-
-            _ => {}
+        if line_width.is_end_of_line(chars_in_line) {
+            output.write_all(b"\n");
+            chars_in_line = 0;
         }
     }
 }
@@ -201,13 +225,17 @@ fn run(matches: ArgMatches) {
         "hex" => mode = Mode::Hex,
         "bin" => mode = Mode::Bin,
         modestr => {
-            println!("Mode '{}', expected 'hex' or 'bin'!", modestr);
+            println!("Mode was '{}', expected 'hex' or 'bin'!", modestr);
             std::process::exit(1);
         }
     }
 
     let width = if matches.is_present("ROWWIDTH") {
-        LineWidth::Width(matches.value_of("ROWWIDTH").unwrap().parse().unwrap())
+        let line_width = matches.value_of("ROWWIDTH")
+                                .unwrap()
+                                .parse()
+                                .expect("Could not parse given row width!");
+        LineWidth::Width(line_width)
     } else {
         LineWidth::Unlimited
     };
@@ -217,6 +245,8 @@ fn run(matches: ArgMatches) {
     } else {
         WordWidth::Unlimited
     };
+
+    let sep = matches.value_of("SEPARATOR").unwrap();
 
     let case = if matches.is_present("LOWER") {
         Case::Lower
@@ -230,16 +260,26 @@ fn run(matches: ArgMatches) {
         Prefixed::NoPrefix
     };
 
-    let mut input_file = File::open(filename).expect("Could not open input file!");
-    let mut output_file = File::open(outfilename).expect("Could not open output file!");
+    let mut input_file = OpenOptions::new()
+                           .read(true)
+                           .open(filename)
+                           .expect("Could not open input file!");
+
+    let mut output_file = OpenOptions::new()
+                            .write(true)
+                            .create(true)
+                            .append(false)
+                            .truncate(true)
+                            .open(outfilename)
+                            .expect("Could not open output file!");
 
     match mode {
         Mode::Hex => {
-            encode(input_file, output_file);
+            decode(input_file, output_file, width, word_width, case, prefix, sep);
         }
 
         Mode::Bin => {
-            decode(input_file, output_file, width, word_width, case, prefix);
+            encode(input_file, output_file);
         }
     }
 }
