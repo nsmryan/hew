@@ -1,6 +1,6 @@
 extern crate clap;
 
-use std::io::{Write, Read};
+use std::io::{Write, Read, BufReader};
 use std::fs::OpenOptions;
 use std::path::Path;
 
@@ -262,6 +262,7 @@ fn run(matches: ArgMatches) {
                        .read(true)
                        .open(filename)
                        .expect("Could not open input file!");
+    let input_file = BufReader::new(input_file);
 
     let output_file = OpenOptions::new()
                         .write(true)
