@@ -3,10 +3,11 @@ name = "hew"
 version = "0.1.0"
 authors = ["nsmryan <nsmryan@gmail.com>"]
 edition = "2018"
-keywords = ["encoding", "decoding", "hexadecimal", "binary", "cli", "command-line"]
+keywords = ["encoding", "decoding", "hexadecimal", "binary", "cli"]
 description = "Command line tool for converting binary data to and from hexadecimal"
 license = "MIT"
 readme = "README.markdown"
+repository = "https://github.com/nsmryan/hew"
 
 [dependencies]
 clap = "2.32.0"
