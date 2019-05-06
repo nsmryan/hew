@@ -9,7 +9,7 @@ code again and again.
 The hexadecimal data given will be read regardless of whitespace
 or separator characters to attempt to support the widest range of use cases.
 The hexadecimal output is configurable to allow a separator, an optional '0x' prefix,
-hex words split into groups, and mulitple rows of a given number of bytes of data.
+hex words split into groups, and multiple rows of a given number of bytes of data.
 
 # Usage
 Hew has two distinct modes- bin and hex- and must be provided a mode on the
@@ -60,7 +60,9 @@ To get the file (as viewed with xxd):
 Encoding has no flags to control the process- hex numbers are taken from a file,
 skipping unrelated characters like whitespaces. One thing to be careful of
 is that hew will attempt to encode any characters that look like hex,
-so the word 'Become" will be encoded as 0xBCEE (the non-hex characters are ignored).
+so the word 'Become" will be encoded as 0xBECE (the non-hex characters are ignored).
+Its better to have only whitespace, punctuation, and '0x' characters in the file along
+with your hex data.
 
 
 Another example of a file that hew will accept is:
