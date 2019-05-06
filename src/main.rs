@@ -1,6 +1,6 @@
 extern crate clap;
 
-use std::io::{Write, Read, BufReader};
+use std::io::{Write, Read, BufReader, BufWriter};
 use std::fs::OpenOptions;
 use std::path::Path;
 
@@ -290,6 +290,8 @@ fn run(matches: ArgMatches) {
                         .truncate(true)
                         .open(outfilename)
                         .expect("Could not open output file!");
+
+    let output_file = BufWriter::new(output_file);
 
     match mode {
         Mode::Hex => {
