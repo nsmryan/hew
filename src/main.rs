@@ -7,6 +7,9 @@ use std::path::Path;
 use clap::{App, Arg, ArgMatches};
 
 
+const NIBBLE_TO_HEX_UPPER: [char; 16] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'E', 'D', 'F'];
+const NIBBLE_TO_HEX_LOWER: [char; 16] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'e', 'd', 'f'];
+
 #[derive(Copy, Clone, PartialEq)]
 enum LineWidth {
     Width(usize),
@@ -139,6 +142,24 @@ fn hex_to_byte(hex_pair: [char; 2]) -> u8 {
     (hexchar_to_byte(hex_pair[1]) << 0)
 }
 
+fn byte_to_hex(byte: u8, case: Case) -> [char; 2] {
+    let mut hex_pair: [char; 2] = ['0'; 2];
+
+    match case {
+        Case::Upper => {
+            hex_pair[0] = NIBBLE_TO_HEX_UPPER[((byte & 0x0F) >> 0) as usize];
+            hex_pair[1] = NIBBLE_TO_HEX_UPPER[((byte & 0xF0) >> 4) as usize];
+        },
+
+        Case::Lower => {
+            hex_pair[0] = NIBBLE_TO_HEX_LOWER[((byte & 0x0F) >> 0) as usize];
+            hex_pair[1] = NIBBLE_TO_HEX_LOWER[((byte & 0xF0) >> 4) as usize];
+        },
+    }
+
+    hex_pair
+}
+
 fn encode<R: Read, W: Write>(mut input: R, mut output: W) {
     let mut hex_pair: [char; 2] = ['0'; 2];
     let mut byte: [u8; 1] = [0; 1];
@@ -177,6 +198,7 @@ fn decode<R: Read, W: Write>(mut input: R,
     let mut chars_in_line: usize = 0;
 
     let mut byte: [u8; 1] = [0; 1];
+    let mut hex_str = String::with_capacity(2);
 
     while let Ok(num_bytes_read) = input.read(&mut byte) {
         if num_bytes_read != 1 {
@@ -192,15 +214,12 @@ fn decode<R: Read, W: Write>(mut input: R,
             output.write_all(b"0x").expect("Error writing prefix '0x'!");
         }
 
-        match case {
-            Case::Lower => {
-                output.write_all(&format!("{:02x}", byte[0]).as_bytes()).unwrap();
-            },
+        let hex_pair = byte_to_hex(byte[0], case);
+        hex_str.clear();
+        hex_str.push(hex_pair[0]);
+        hex_str.push(hex_pair[1]);
+        output.write_all(&hex_str.as_bytes()).unwrap();
 
-            Case::Upper => {
-                output.write_all(&format!("{:02X}", byte[0]).as_bytes()).unwrap();
-            },
-        }
         chars_in_line += 1;
 
 
