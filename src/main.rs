@@ -144,18 +144,20 @@ fn hex_to_byte(hex_pair: [char; 2]) -> u8 {
 
 fn byte_to_hex(byte: u8, case: Case) -> [char; 2] {
     let mut hex_pair: [char; 2] = ['0'; 2];
+    let translation;
 
     match case {
         Case::Upper => {
-            hex_pair[0] = NIBBLE_TO_HEX_UPPER[((byte & 0x0F) >> 0) as usize];
-            hex_pair[1] = NIBBLE_TO_HEX_UPPER[((byte & 0xF0) >> 4) as usize];
+            translation = &NIBBLE_TO_HEX_UPPER;
         },
 
         Case::Lower => {
-            hex_pair[0] = NIBBLE_TO_HEX_LOWER[((byte & 0x0F) >> 0) as usize];
-            hex_pair[1] = NIBBLE_TO_HEX_LOWER[((byte & 0xF0) >> 4) as usize];
+            translation = &NIBBLE_TO_HEX_LOWER;
         },
     }
+
+    hex_pair[0] = translation[((byte & 0xF0) >> 4) as usize];
+    hex_pair[1] = translation[((byte & 0x0F) >> 0) as usize];
 
     hex_pair
 }
