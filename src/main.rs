@@ -59,7 +59,7 @@ enum Case {
 
 
 fn main() {
-    let matches = App::new("parcel")
+    let matches = App::new("hew")
         .version("0.1")
         .author("Noah Ryan")
         .about("Binary to Hex, Hex to Binary Converter")

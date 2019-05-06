@@ -1,6 +1,6 @@
-Parcel
+Hew
 ======
-Parcel is a command line tool for converting binary data to and from
+Hew is a command line tool for converting binary data to and from
 hexadecimal. This is a task I occasionally need to perform, and I wanted
 a simple tool which covered the common cases so I don't have to write this
 code again and again.
@@ -12,18 +12,18 @@ The hexadecimal output is configurable to allow a separator, an optional '0x' pr
 hex words split into groups, and mulitple rows of a given number of bytes of data.
 
 # Usage
-Parcel has two distinct modes- bin and hex- and must be provided a mode on the
+Hew has two distinct modes- bin and hex- and must be provided a mode on the
 command line. In bin mode, a binary file is created, and in hex mode a text
 file containing hexadecimal numbers is created.
 
 
 ```shell
-parcel 0.1
+hew 0.1
 Noah Ryan
 Binary to Hex, Hex to Binary Converter
 
 USAGE:
-    parcel [FLAGS] [OPTIONS] --input <FILE> --output <OUTFILE>
+    hew [FLAGS] [OPTIONS] --input <FILE> --output <OUTFILE>
 
 FLAGS:
     -l, --lowercase    Print hex in lowercase (default is UPPERCASE)
@@ -48,7 +48,7 @@ Given the following file of hexadecimal numbers in a file called numbers.hex:
 
 run the following command to encode them to binary:
 ```shell
-parcel -i numbers.hex -o numbers.bin -m bin
+hew -i numbers.hex -o numbers.bin -m bin
 ```
 
 To get the file (as viewed with xxd):
@@ -59,21 +59,21 @@ To get the file (as viewed with xxd):
 
 Encoding has no flags to control the process- hex numbers are taken from a file,
 skipping unrelated characters like whitespaces. One thing to be careful of
-is that parcel will attempt to encode any characters that look like hex,
+is that hew will attempt to encode any characters that look like hex,
 so the word 'Become" will be encoded as 0xBCEE (the non-hex characters are ignored).
 
 
-Another example of a file that parcel will accept is:
+Another example of a file that hew will accept is:
 ```text
 0x0123 0x4567
 0x89AB
 0xCDEF
 ```
-Where parcel will notice the '0x' characters together and ignore them.
+Where hew will notice the '0x' characters together and ignore them.
 
 
 ## Decoding
-When decoding binary data into hex digits, parcel provides a number of options.
+When decoding binary data into hex digits, hew provides a number of options.
 
 Using the example binary file (as viewed by xxd):
 ```text
@@ -82,7 +82,7 @@ Using the example binary file (as viewed by xxd):
 
 These options control whether the result is a single sequence of characters:
 ```shell
-parcel -i numbers.bin -o numbers.txt -m hex
+hew -i numbers.bin -o numbers.txt -m hex
 ```
 
 resulting in:
@@ -95,7 +95,7 @@ This can be modified to, say, print 2 bytes as a word, prefixed by 0x,
 with 4 bytes per line.
 
 ```shell
-parcel -i numbers.bin -o numbers.txt -m hex -p -w 2 -r 4
+hew -i numbers.bin -o numbers.txt -m hex -p -w 2 -r 4
 ```
 
 resulting in:
@@ -107,7 +107,7 @@ resulting in:
 
 Another example would be each byte separated by a comma, no prefix, all on one line:
 ```shell
-parcel -i numbers.bin -o numbers.txt -m hex -w 1 -s ", "
+hew -i numbers.bin -o numbers.txt -m hex -w 1 -s ", "
 ```
 
 ```text
@@ -116,14 +116,14 @@ parcel -i numbers.bin -o numbers.txt -m hex -w 1 -s ", "
 
 
 # Installation
-Parcel can be installed through 'cargo' with:
+Hew can be installed through 'cargo' with:
 ```shell
-cargo install parcel
+cargo install hew
 ```
 
-or it can be installed by retrieving binaries from https://github/nsmryan/parcel/releases.
+or it can be installed by retrieving binaries from https://github/nsmryan/hew/releases.
 
 
 # License
-Parcel is licensed under either the MIT License or the APACHE 2.0 License,
+Hew is licensed under either the MIT License or the APACHE 2.0 License,
 whichever you prefer.
