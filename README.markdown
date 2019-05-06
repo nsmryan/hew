@@ -18,7 +18,7 @@ file containing hexadecimal numbers is created.
 
 
 ```shell
-hew 0.1
+hew 0.2
 Noah Ryan
 Binary to Hex, Hex to Binary Converter
 

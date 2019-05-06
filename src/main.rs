@@ -60,7 +60,7 @@ enum Case {
 
 fn main() {
     let matches = App::new("hew")
-        .version("0.1")
+        .version("0.2")
         .author("Noah Ryan")
         .about("Binary to Hex, Hex to Binary Converter")
         .arg(Arg::with_name("FILE")
