@@ -1,7 +1,7 @@
 extern crate clap;
 
 use std::io::{Write, Read};
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::path::Path;
 
 use clap::{App, Arg, ArgMatches};
@@ -59,7 +59,7 @@ enum Case {
 
 
 fn main() {
-    let matches = App::new("decept")
+    let matches = App::new("parcel")
         .version("0.1")
         .author("Noah Ryan")
         .about("Binary to Hex, Hex to Binary Converter")
@@ -157,7 +157,7 @@ fn encode<R: Read, W: Write>(mut input: R, mut output: W) {
 
             if (next_index % 2) == 0 {
                 byte[0] = hex_to_byte(hex_pair);
-                output.write(&mut byte);
+                output.write(&mut byte).expect("Error writing byte!");
             }
         } else if next_index == 1 && 
                   chr == 'x' &&
@@ -174,7 +174,6 @@ fn decode<R: Read, W: Write>(mut input: R,
                              case: Case,
                              prefix: Prefixed,
                              sep: &str) {
-    let mut chars_written: usize = 0;
     let mut chars_in_line: usize = 0;
 
     let mut byte: [u8; 1] = [0; 1];
@@ -185,29 +184,28 @@ fn decode<R: Read, W: Write>(mut input: R,
         }
 
         if word_width.is_end_of_word(chars_in_line) && !(chars_in_line == 0) {
-            output.write_all(sep.as_bytes());
+            output.write_all(sep.as_bytes()).expect("Error writing separator!");
         }
 
         if (word_width.is_end_of_word(chars_in_line) || chars_in_line == 0) &&
            prefix == Prefixed::HexPrefix {
-            output.write_all(b"0x").unwrap();
+            output.write_all(b"0x").expect("Error writing prefix '0x'!");
         }
 
         match case {
             Case::Lower => {
-                output.write_all(&format!("{:02X}", byte[0]).as_bytes()).unwrap();
+                output.write_all(&format!("{:02x}", byte[0]).as_bytes()).unwrap();
             },
 
             Case::Upper => {
-                output.write_all(&format!("{:02x}", byte[0]).as_bytes()).unwrap();
+                output.write_all(&format!("{:02X}", byte[0]).as_bytes()).unwrap();
             },
         }
-        chars_written += 1;
         chars_in_line += 1;
 
 
         if line_width.is_end_of_line(chars_in_line) {
-            output.write_all(b"\n");
+            output.write_all(b"\n").expect("Error writing newline!");
             chars_in_line = 0;
         }
     }
@@ -260,18 +258,18 @@ fn run(matches: ArgMatches) {
         Prefixed::NoPrefix
     };
 
-    let mut input_file = OpenOptions::new()
-                           .read(true)
-                           .open(filename)
-                           .expect("Could not open input file!");
+    let input_file = OpenOptions::new()
+                       .read(true)
+                       .open(filename)
+                       .expect("Could not open input file!");
 
-    let mut output_file = OpenOptions::new()
-                            .write(true)
-                            .create(true)
-                            .append(false)
-                            .truncate(true)
-                            .open(outfilename)
-                            .expect("Could not open output file!");
+    let output_file = OpenOptions::new()
+                        .write(true)
+                        .create(true)
+                        .append(false)
+                        .truncate(true)
+                        .open(outfilename)
+                        .expect("Could not open output file!");
 
     match mode {
         Mode::Hex => {
