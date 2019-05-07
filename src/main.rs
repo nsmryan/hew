@@ -1,8 +1,10 @@
 extern crate clap;
 
-use std::io::{Write, Read, BufReader, BufWriter, Cursor};
+use std::io::{Write, Read, BufReader, BufWriter};
 use std::fs::OpenOptions;
 use std::path::Path;
+
+#[cfg(test)] use std::io::Cursor;
 
 use clap::{App, Arg, ArgMatches};
 
@@ -269,6 +271,7 @@ fn decode<R: Read, W: Write>(mut input: R,
         }
 
         if word_width.is_end_of_word(chars_in_line) && !(chars_in_line == 0) {
+            println!("Writing delimter");
             output.write_all(sep.as_bytes()).expect("Error writing separator!");
         }
 
@@ -296,7 +299,7 @@ fn decode<R: Read, W: Write>(mut input: R,
 
 #[test]
 fn test_decode_simple() {
-  let input = vec!(0xCD, 0xEF);
+  let input = vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF);
   let mut output = Vec::with_capacity(100);
 
   let line_width = LineWidth::Unlimited;
@@ -308,7 +311,67 @@ fn test_decode_simple() {
   decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
 
   assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
-             "CDEF");
+             "0123456789ABCDEF");
+}
+
+#[test]
+fn test_decode_case() {
+  let input = vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF);
+  let mut output = Vec::with_capacity(100);
+
+  let line_width = LineWidth::Unlimited;
+  let word_width = WordWidth::Unlimited;
+  let case = Case::Upper;
+  let prefix = Prefixed::NoPrefix;
+  let sep = "";
+
+  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+  assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
+             "0123456789ABCDEF");
+
+  let input = vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF);
+  let mut output = Vec::with_capacity(100);
+  let case = Case::Lower;
+  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+  assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
+             "0123456789abcdef");
+}
+
+#[test]
+fn test_decode_words() {
+  let input = vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF);
+  let mut output = Vec::with_capacity(100);
+
+  let line_width = LineWidth::Unlimited;
+  let word_width = WordWidth::Chars(1);
+  let case = Case::Upper;
+  let prefix = Prefixed::NoPrefix;
+  let sep = " ";
+
+  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+  assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
+             "01 23 45 67 89 AB CD EF");
+
+  let input = vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF);
+  let mut output = Vec::with_capacity(100);
+  let line_width = LineWidth::Width(2);
+  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+  assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
+             "01 23\n45 67\n89 AB\nCD EF\n");
+
+  let input = vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF);
+  let mut output = Vec::with_capacity(100);
+  let prefix = Prefixed::HexPrefix;
+  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+  assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
+             "0x01 0x23\n0x45 0x67\n0x89 0xAB\n0xCD 0xEF\n");
+
+  let input = vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF);
+  let mut output = Vec::with_capacity(100);
+  let sep = ", ";
+  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+  assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
+             "0x01, 0x23\n0x45, 0x67\n0x89, 0xAB\n0xCD, 0xEF\n");
 }
 
 fn run(matches: ArgMatches) {
