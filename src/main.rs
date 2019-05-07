@@ -1,14 +1,17 @@
 extern crate clap;
 
-use std::io::{Write, Read, BufReader, BufWriter};
+use std::io::{Write, Read, BufReader, BufWriter, Cursor};
 use std::fs::OpenOptions;
 use std::path::Path;
 
 use clap::{App, Arg, ArgMatches};
 
 
-const NIBBLE_TO_HEX_UPPER: [char; 16] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'E', 'D', 'F'];
-const NIBBLE_TO_HEX_LOWER: [char; 16] = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'e', 'd', 'f'];
+const NIBBLE_TO_HEX_UPPER: [char; 16] =
+    ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'];
+
+const NIBBLE_TO_HEX_LOWER: [char; 16] =
+    ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
 
 #[derive(Copy, Clone, PartialEq)]
 enum LineWidth {
@@ -190,6 +193,64 @@ fn encode<R: Read, W: Write>(mut input: R, mut output: W) {
     }
 }
 
+#[test]
+fn test_encode_upper_case() {
+    // upper case
+    let input = "0123456789ABCDEF";
+    let mut output = Vec::with_capacity(input.len());
+
+    encode(input.as_bytes(), &mut output);
+    assert_eq!(output, vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF));
+}
+
+#[test]
+fn test_encode_lower_case() {
+    // lower case
+    let input = "0123456789abcdef";
+    let mut output = Vec::with_capacity(input.len());
+
+    encode(input.as_bytes(), &mut output);
+    assert_eq!(output, vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF));
+}
+
+#[test]
+fn test_encode_with_whitespace() {
+    let input = "01   \n23456789\r\nabcd ef";
+    let mut output = Vec::with_capacity(input.len());
+
+    encode(input.as_bytes(), &mut output);
+    assert_eq!(output, vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF));
+}
+
+#[test]
+fn test_encode_with_prefix() {
+    let input = "0x010x23450x6789\r\nabcd 0xef";
+    let mut output = Vec::with_capacity(input.len());
+
+    encode(input.as_bytes(), &mut output);
+    assert_eq!(output, vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF));
+}
+
+#[test]
+// NOTE this does not test an odd number of hex digits, just an odd number of bytes
+fn test_encode_odd_number() {
+    let input = "0123456789abcd";
+    let mut output = Vec::with_capacity(input.len());
+
+    encode(input.as_bytes(), &mut output);
+    assert_eq!(output, vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD));
+}
+
+#[test]
+fn test_encode_empty() {
+    let input = "";
+    let mut output = Vec::with_capacity(input.len());
+
+    encode(input.as_bytes(), &mut output);
+    assert_eq!(output, vec!());
+}
+
+
 fn decode<R: Read, W: Write>(mut input: R,
                              mut output: W,
                              line_width: LineWidth,
@@ -220,6 +281,7 @@ fn decode<R: Read, W: Write>(mut input: R,
         hex_str.clear();
         hex_str.push(hex_pair[0]);
         hex_str.push(hex_pair[1]);
+
         output.write_all(&hex_str.as_bytes()).unwrap();
 
         chars_in_line += 1;
@@ -232,6 +294,22 @@ fn decode<R: Read, W: Write>(mut input: R,
     }
 }
 
+#[test]
+fn test_decode_simple() {
+  let input = vec!(0xCD, 0xEF);
+  let mut output = Vec::with_capacity(100);
+
+  let line_width = LineWidth::Unlimited;
+  let word_width = WordWidth::Unlimited;
+  let case = Case::Upper;
+  let prefix = Prefixed::NoPrefix;
+  let sep = "";
+
+  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+
+  assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
+             "CDEF");
+}
 
 fn run(matches: ArgMatches) {
     let filename = matches.value_of("FILE").unwrap().to_string();
