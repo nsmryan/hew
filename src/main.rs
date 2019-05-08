@@ -8,6 +8,8 @@ use std::path::Path;
 
 use clap::{App, Arg, ArgMatches};
 
+const WRITE_BUFFER_SIZE_BYTES: usize =  1024*16;
+const READ_BUFFER_SIZE_BYTES: usize =  1024*128;
 
 const NIBBLE_TO_HEX_UPPER: [char; 16] =
     ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'];
@@ -252,6 +254,20 @@ fn test_encode_empty() {
     assert_eq!(output, vec!());
 }
 
+fn push_to_write_buffer<W: Write>(output: &mut W,
+                                  write_buffer: &mut [u8],
+                                  write_index: &mut usize,
+                                  bytes: &[u8]) {
+    for index in 0..bytes.len() {
+        if *write_index == write_buffer.len() {
+            output.write(write_buffer).expect("Error writing to output!");
+            *write_index = 0;
+        }
+
+        write_buffer[*write_index] = bytes[index];
+        *write_index += 1;
+    }
+}
 
 fn decode<R: Read, W: Write>(mut input: R,
                              mut output: W,
@@ -261,38 +277,52 @@ fn decode<R: Read, W: Write>(mut input: R,
                              prefix: Prefixed,
                              sep: &str) {
     let mut chars_in_line: usize = 0;
+    let mut write_index: usize = 0;
 
     let mut byte: [u8; 1] = [0; 1];
     let mut hex_bytes: [u8; 2] = [0; 2];
 
-    while let Ok(num_bytes_read) = input.read(&mut byte) {
-        if num_bytes_read != 1 {
+    let mut buffer: [u8; READ_BUFFER_SIZE_BYTES] = [0; READ_BUFFER_SIZE_BYTES];
+    let mut write_buffer: [u8; WRITE_BUFFER_SIZE_BYTES] = [0; WRITE_BUFFER_SIZE_BYTES];
+
+    while let Ok(num_bytes_read) = input.read(&mut buffer) {
+        if num_bytes_read == 0 {
             break;
         }
 
-        if word_width.is_end_of_word(chars_in_line) && !(chars_in_line == 0) {
-            println!("Writing delimter");
-            output.write_all(sep.as_bytes()).expect("Error writing separator!");
-        }
+        for byte_index in 0..num_bytes_read {
+            byte[0] = buffer[byte_index];
 
-        if (word_width.is_end_of_word(chars_in_line) || chars_in_line == 0) &&
-           prefix == Prefixed::HexPrefix {
-            output.write_all(b"0x").expect("Error writing prefix '0x'!");
-        }
+            if word_width.is_end_of_word(chars_in_line) && !(chars_in_line == 0) {
+                push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, sep.as_bytes());
+                //output.write_all(sep.as_bytes()).expect("Error writing separator!");
+            }
 
-        let hex_pair = byte_to_hex(byte[0], case);
-        hex_bytes[0] = hex_pair[0] as u8;
-        hex_bytes[1] = hex_pair[1] as u8;
-        output.write_all(&hex_bytes[..]).unwrap();
+            if (word_width.is_end_of_word(chars_in_line) || chars_in_line == 0) &&
+               prefix == Prefixed::HexPrefix {
+                push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &b"0x"[..]);
+                //output.write_all(b"0x").expect("Error writing prefix '0x'!");
+            }
 
-        chars_in_line += 1;
+            let hex_pair = byte_to_hex(byte[0], case);
+            hex_bytes[0] = hex_pair[0] as u8;
+            hex_bytes[1] = hex_pair[1] as u8;
+            //output.write_all(&hex_bytes[..]).unwrap();
+            push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &hex_bytes[..]);
+
+            chars_in_line += 1;
 
 
-        if line_width.is_end_of_line(chars_in_line) {
-            output.write_all(b"\n").expect("Error writing newline!");
-            chars_in_line = 0;
+            if line_width.is_end_of_line(chars_in_line) {
+                //output.write_all(b"\n").expect("Error writing newline!");
+                push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &b"\n"[..]);
+                chars_in_line = 0;
+            }
         }
     }
+
+    // Write out remaining bytes of buffer
+    output.write(&write_buffer[0..write_index]).expect("Error flushing write buffer!");
 }
 
 #[test]
