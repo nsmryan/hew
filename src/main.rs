@@ -8,6 +8,7 @@ use std::path::Path;
 
 use clap::{App, Arg, ArgMatches};
 
+
 const WRITE_BUFFER_SIZE_BYTES: usize =  1024*16;
 const READ_BUFFER_SIZE_BYTES: usize =  1024*128;
 
@@ -175,26 +176,38 @@ fn encode<R: Read, W: Write>(mut input: R, mut output: W) {
 
     let mut next_index = 0;
 
-    while let Ok(bytes) = input.read(&mut byte) {
-        if bytes != 1 {
+    let mut write_index: usize = 0;
+
+    let mut buffer: [u8; READ_BUFFER_SIZE_BYTES] = [0; READ_BUFFER_SIZE_BYTES];
+    let mut write_buffer: [u8; WRITE_BUFFER_SIZE_BYTES] = [0; WRITE_BUFFER_SIZE_BYTES];
+
+    while let Ok(num_bytes_read) = input.read(&mut buffer) {
+        if num_bytes_read == 0 {
             break;
         }
 
-        let chr = byte[0] as char;
-        if chr.is_ascii_hexdigit() {
-            hex_pair[next_index] = chr;
-            next_index = (next_index + 1) % 2;
+        for byte_index in 0..num_bytes_read {
+            byte[0] = buffer[byte_index];
 
-            if (next_index % 2) == 0 {
-                byte[0] = hex_to_byte(hex_pair);
-                output.write(&mut byte).expect("Error writing byte!");
+            let chr = byte[0] as char;
+            if chr.is_ascii_hexdigit() {
+                hex_pair[next_index] = chr;
+                next_index = (next_index + 1) % 2;
+
+                if (next_index % 2) == 0 {
+                    byte[0] = hex_to_byte(hex_pair);
+                    push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &byte[..]);
+                }
+            } else if next_index == 1 && 
+                      chr == 'x' &&
+                      hex_pair[0] == '0' {
+                next_index = 0;
             }
-        } else if next_index == 1 && 
-                  chr == 'x' &&
-                  hex_pair[0] == '0' {
-            next_index = 0;
         }
     }
+
+    // Write out remaining bytes of buffer
+    output.write(&write_buffer[0..write_index]).expect("Error flushing write buffer!");
 }
 
 #[test]
@@ -295,26 +308,22 @@ fn decode<R: Read, W: Write>(mut input: R,
 
             if word_width.is_end_of_word(chars_in_line) && !(chars_in_line == 0) {
                 push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, sep.as_bytes());
-                //output.write_all(sep.as_bytes()).expect("Error writing separator!");
             }
 
             if (word_width.is_end_of_word(chars_in_line) || chars_in_line == 0) &&
                prefix == Prefixed::HexPrefix {
                 push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &b"0x"[..]);
-                //output.write_all(b"0x").expect("Error writing prefix '0x'!");
             }
 
             let hex_pair = byte_to_hex(byte[0], case);
             hex_bytes[0] = hex_pair[0] as u8;
             hex_bytes[1] = hex_pair[1] as u8;
-            //output.write_all(&hex_bytes[..]).unwrap();
             push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &hex_bytes[..]);
 
             chars_in_line += 1;
 
 
             if line_width.is_end_of_line(chars_in_line) {
-                //output.write_all(b"\n").expect("Error writing newline!");
                 push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &b"\n"[..]);
                 chars_in_line = 0;
             }
