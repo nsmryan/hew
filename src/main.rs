@@ -263,7 +263,7 @@ fn decode<R: Read, W: Write>(mut input: R,
     let mut chars_in_line: usize = 0;
 
     let mut byte: [u8; 1] = [0; 1];
-    let mut hex_str = String::with_capacity(2);
+    let mut hex_bytes: [u8; 2] = [0; 2];
 
     while let Ok(num_bytes_read) = input.read(&mut byte) {
         if num_bytes_read != 1 {
@@ -281,11 +281,9 @@ fn decode<R: Read, W: Write>(mut input: R,
         }
 
         let hex_pair = byte_to_hex(byte[0], case);
-        hex_str.clear();
-        hex_str.push(hex_pair[0]);
-        hex_str.push(hex_pair[1]);
-
-        output.write_all(&hex_str.as_bytes()).unwrap();
+        hex_bytes[0] = hex_pair[0] as u8;
+        hex_bytes[1] = hex_pair[1] as u8;
+        output.write_all(&hex_bytes[..]).unwrap();
 
         chars_in_line += 1;
 
