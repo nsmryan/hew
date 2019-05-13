@@ -170,6 +170,33 @@ fn byte_to_hex(byte: u8, case: Case) -> [char; 2] {
     hex_pair
 }
 
+fn buffered<R, W>(mut input: R, mut output: W, f: &Fn(&mut Vec<u8>, &mut Vec<u8>)) 
+    where R: Read, 
+          W: Write {
+    let mut hex_pair: [char; 2] = ['0'; 2];
+    let mut byte: [u8; 1] = [0; 1];
+
+    let mut next_index = 0;
+
+    let mut write_index: usize = 0;
+
+    let mut buffer: Vec<u8> = vec!(0; READ_BUFFER_SIZE_BYTES);
+    let mut write_buffer: Vec<u8> = vec!(0; WRITE_BUFFER_SIZE_BYTES);
+
+    while let Ok(num_bytes_read) = input.read(&mut buffer) {
+        if num_bytes_read == 0 {
+            break;
+        }
+
+        f(&mut buffer, &mut write_buffer);
+        output.write(&write_buffer[0..write_index]).expect("Error writing to output!");
+    }
+
+    f(&mut buffer, &mut write_buffer);
+    output.write(&write_buffer[0..write_index]).expect("Error flushing write buffer!");
+}
+
+
 fn encode<R: Read, W: Write>(mut input: R, mut output: W) {
     let mut hex_pair: [char; 2] = ['0'; 2];
     let mut byte: [u8; 1] = [0; 1];
@@ -204,6 +231,8 @@ fn encode<R: Read, W: Write>(mut input: R, mut output: W) {
                 next_index = 0;
             }
         }
+
+        output.write(&write_buffer).expect("Error writing buffer!");
     }
 
     // Write out remaining bytes of buffer
@@ -328,6 +357,8 @@ fn decode<R: Read, W: Write>(mut input: R,
                 chars_in_line = 0;
             }
         }
+
+        output.write(&write_buffer).expect("Error writing buffer!");
     }
 
     // Write out remaining bytes of buffer
