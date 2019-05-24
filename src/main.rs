@@ -25,10 +25,7 @@ const NIBBLE_TO_HEX_LOWER: [char; 16] =
     ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
 
 #[derive(Clone, PartialEq)]
-enum Msg {
-    Work(Vec<u8>, Vec<u8>),
-    NoWork,
-}
+struct Msg(Vec<u8>, Vec<u8>);
 
 #[derive(Copy, Clone, PartialEq)]
 enum LineWidth {
@@ -196,29 +193,19 @@ fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
         let (recycle_sender, recycle_receive) = bounded::<Msg>(num_threads);
 
         for _ in 0..num_threads {
-            recycle_sender.send(Msg::Work(vec!(), vec!())).unwrap();
+            recycle_sender.send(Msg(vec!(), vec!())).unwrap();
 
             let local_receiver = receiver.clone();
             let local_send_result = send_result.clone();
             let local_f = f.clone();
             s.spawn(move |_| {
-                while let Ok(msg) = local_receiver.recv() {
-                    match msg {
-
-                      Msg::Work(mut buffer, mut write_buffer) => {
-                        local_f(&mut buffer[..], &mut write_buffer);
-                        let result = local_send_result.send(Msg::Work(buffer, write_buffer));
-                        if !result.is_ok() {
-                            break;
-                        }
-                      },
-
-                      Msg::NoWork => {
-                          break;
-                        },
+                while let Ok(Msg(mut buffer, mut write_buffer)) = local_receiver.recv() {
+                    local_f(&mut buffer[..], &mut write_buffer);
+                    let result = local_send_result.send(Msg(buffer, write_buffer));
+                    if !result.is_ok() {
+                        break;
                     }
                 }
-                local_send_result.send(Msg::NoWork);
             });
         }
 
@@ -229,44 +216,24 @@ fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
 
             num_bytes_read = input.read(&mut buffer).unwrap();
             while num_bytes_read > 0 {
-                let msg = recycle_receive.recv().unwrap();
-                match msg {
-                    Msg::Work(mut buf, mut write_buf) => {
-                        buf.clear();
-                        write_buf.clear();
-                        for index in 0..buffer.len() {
-                            buf.push(buffer[index]);
-                        }
-
-                        sender.send(Msg::Work(buf, write_buf)).unwrap();
-                    },
-
-                    Msg::NoWork => {
-                        break;
-                    },
+                let Msg(mut buf, mut write_buf) = recycle_receive.recv().unwrap();
+                buf.clear();
+                write_buf.clear();
+                for index in 0..num_bytes_read {
+                    buf.push(buffer[index]);
                 }
+
+                sender.send(Msg(buf, write_buf)).unwrap();
 
                 num_bytes_read = input.read(&mut buffer).unwrap();
             }
-
-            for _ in 0..num_threads {
-                sender.send(Msg::NoWork).unwrap();
-            }
         });
 
-        while let Ok(msg) = receive_result.recv() {
-            match msg {
-                Msg::Work(buff, write_buff) => {
-                    output.write(&write_buff).expect("Error writing to output!");
-                    let result = recycle_sender.send(Msg::Work(buff, write_buff));
-                    if !result.is_ok() {
-                        break;
-                    }
-                }
-
-                Msg::NoWork => {
-                    break;
-                }
+        while let Ok(Msg(buff, write_buff)) = receive_result.recv() {
+            output.write(&write_buff).expect("Error writing to output!");
+            let result = recycle_sender.send(Msg(buff, write_buff));
+            if !result.is_ok() {
+                break;
             }
         }
     }).unwrap();
@@ -387,6 +354,7 @@ fn decode<R: Read + Sync + Send, W: Write>(input: &mut R,
              decode_buffer(input, out, line_width, word_width, case, prefix, sep);
     });
 }
+
 fn decode_buffer(buffer: &[u8],
                  write_buffer: &mut Vec<u8>,
                  line_width: LineWidth,
