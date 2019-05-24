@@ -215,6 +215,7 @@ fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
             let mut buffer: Vec<u8> = vec!(0; READ_BUFFER_SIZE_BYTES);
 
             num_bytes_read = input.read(&mut buffer).unwrap();
+            println!("bytes read = {}", num_bytes_read);
             while num_bytes_read > 0 {
                 let Msg(mut buf, mut write_buf) = recycle_receive.recv().unwrap();
                 buf.clear();
@@ -277,7 +278,7 @@ fn test_encode_upper_case() {
     let input = "0123456789ABCDEF";
     let mut output = Vec::with_capacity(input.len());
 
-    encode(input.as_bytes(), &mut output);
+    encode(&mut input.as_bytes(), &mut output);
     assert_eq!(output, vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF));
 }
 
@@ -287,7 +288,7 @@ fn test_encode_lower_case() {
     let input = "0123456789abcdef";
     let mut output = Vec::with_capacity(input.len());
 
-    encode(input.as_bytes(), &mut output);
+    encode(&mut input.as_bytes(), &mut output);
     assert_eq!(output, vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF));
 }
 
@@ -296,7 +297,7 @@ fn test_encode_with_whitespace() {
     let input = "01   \n23456789\r\nabcd ef";
     let mut output = Vec::with_capacity(input.len());
 
-    encode(input.as_bytes(), &mut output);
+    encode(&mut input.as_bytes(), &mut output);
     assert_eq!(output, vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF));
 }
 
@@ -305,7 +306,7 @@ fn test_encode_with_prefix() {
     let input = "0x010x23450x6789\r\nabcd 0xef";
     let mut output = Vec::with_capacity(input.len());
 
-    encode(input.as_bytes(), &mut output);
+    encode(&mut input.as_bytes(), &mut output);
     assert_eq!(output, vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF));
 }
 
@@ -315,17 +316,21 @@ fn test_encode_odd_number() {
     let input = "0123456789abcd";
     let mut output = Vec::with_capacity(input.len());
 
-    encode(input.as_bytes(), &mut output);
+    encode(&mut input.as_bytes(), &mut output);
     assert_eq!(output, vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD));
 }
 
 #[test]
 fn test_encode_empty() {
     let input = "";
+    println!("vec");
     let mut output = Vec::with_capacity(input.len());
 
-    encode(input.as_bytes(), &mut output);
+    println!("starting");
+    encode(&mut input.as_bytes(), &mut output);
+    println!("encoded");
     assert_eq!(output, vec!());
+    println!("done");
 }
 
 fn decode<R: Read + Sync + Send, W: Write>(input: &mut R,
@@ -390,7 +395,7 @@ fn test_decode_simple() {
   let prefix = Prefixed::NoPrefix;
   let sep = "";
 
-  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+  decode(&mut Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
 
   assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
              "0123456789ABCDEF");
@@ -407,14 +412,14 @@ fn test_decode_case() {
   let prefix = Prefixed::NoPrefix;
   let sep = "";
 
-  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+  decode(&mut Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
   assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
              "0123456789ABCDEF");
 
   let input = vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF);
   let mut output = Vec::with_capacity(100);
   let case = Case::Lower;
-  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+  decode(&mut Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
   assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
              "0123456789abcdef");
 }
@@ -430,30 +435,34 @@ fn test_decode_words() {
   let prefix = Prefixed::NoPrefix;
   let sep = " ";
 
-  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+  decode(&mut Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
   assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
              "01 23 45 67 89 AB CD EF");
 
   let input = vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF);
   let mut output = Vec::with_capacity(100);
   let line_width = LineWidth::Width(2);
-  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+  decode(&mut Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
   assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
              "01 23\n45 67\n89 AB\nCD EF\n");
 
   let input = vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF);
   let mut output = Vec::with_capacity(100);
   let prefix = Prefixed::HexPrefix;
-  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+  decode(&mut Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
   assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
              "0x01 0x23\n0x45 0x67\n0x89 0xAB\n0xCD 0xEF\n");
 
   let input = vec!(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF);
   let mut output = Vec::with_capacity(100);
   let sep = ", ";
-  decode(Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
+  decode(&mut Cursor::new(input), &mut output, line_width, word_width, case, prefix, &sep);
   assert_eq!(output.into_iter().map(|byte| byte as char).collect::<String>(),
              "0x01, 0x23\n0x45, 0x67\n0x89, 0xAB\n0xCD, 0xEF\n");
+}
+
+fn is_hex(c: char) -> bool {
+    NIBBLE_TO_HEX_UPPER.contains(&c) || NIBBLE_TO_HEX_LOWER.contains(&c)
 }
 
 fn run(matches: ArgMatches) {
@@ -489,6 +498,10 @@ fn run(matches: ArgMatches) {
     };
 
     let sep = matches.value_of("SEPARATOR").unwrap();
+    if sep.to_string().chars().any(|byte| is_hex(byte)) {
+        println!("Separator '{}' should not contain hex characters!", sep);
+        std::process::exit(1);
+    }
 
     let case = if matches.is_present("LOWER") {
         Case::Lower
