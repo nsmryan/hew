@@ -5,6 +5,7 @@ use std::io::{Write, Read, BufReader, BufWriter};
 use std::fs::OpenOptions;
 use std::path::Path;
 #[cfg(feature = "flame")]use std::fs::File;
+use std::sync::{Arc, Barrier};
 
 #[cfg(test)] use std::io::Cursor;
 #[cfg(feature = "flame")] use flame::*;
@@ -181,7 +182,7 @@ fn byte_to_hex(byte: u8, case: Case) -> [char; 2] {
 
 fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
     where R: Read + Sync + Send,
-          W: Write,
+          W: Write + Sync + Send,
           F: Fn(&mut [u8], &mut Vec<u8>) + Sync {
     let mut write_buffer: Vec<u8> = vec!();
 
@@ -215,7 +216,6 @@ fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
             let mut buffer: Vec<u8> = vec!(0; READ_BUFFER_SIZE_BYTES);
 
             num_bytes_read = input.read(&mut buffer).unwrap();
-            println!("bytes read = {}", num_bytes_read);
             while num_bytes_read > 0 {
                 let Msg(mut buf, mut write_buf) = recycle_receive.recv().unwrap();
                 buf.clear();
@@ -230,13 +230,15 @@ fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
             }
         });
 
-        while let Ok(Msg(buff, write_buff)) = receive_result.recv() {
-            output.write(&write_buff).expect("Error writing to output!");
-            let result = recycle_sender.send(Msg(buff, write_buff));
-            if !result.is_ok() {
-                break;
+        s.spawn(move |_| {
+            while let Ok(Msg(buff, write_buff)) = receive_result.recv() {
+                output.write(&write_buff).expect("Error writing to output!");
+                let result = recycle_sender.send(Msg(buff, write_buff));
+                if !result.is_ok() {
+                    break;
+                }
             }
-        }
+        });
     }).unwrap();
 }
 
@@ -268,7 +270,10 @@ fn encode_buffer(buffer: &mut [u8], write_buffer: &mut Vec<u8>) {
     }
 }
 
-fn encode<R: Read + Sync + Send, W: Write>(input: &mut R, output: &mut W) {
+fn encode<R, W>(input: &mut R, output: &mut W) 
+    where R: Read + Sync + Send,
+          W: Write + Sync + Send {
+
     buffered(input, output, &encode_buffer);
 }
 
@@ -333,13 +338,15 @@ fn test_encode_empty() {
     println!("done");
 }
 
-fn decode<R: Read + Sync + Send, W: Write>(input: &mut R,
-                             output: &mut W,
-                             line_width: LineWidth,
-                             word_width: WordWidth,
-                             case: Case,
-                             prefix: Prefixed,
-                             sep: &str) {
+fn decode<R, W>(input: &mut R,
+                output: &mut W,
+                line_width: LineWidth,
+                word_width: WordWidth,
+                case: Case,
+                prefix: Prefixed,
+                sep: &str) 
+    where R: Read + Sync + Send,
+          W: Write + Sync + Send {
     buffered(input, output, &|input, out| {
              decode_buffer(input, out, line_width, word_width, case, prefix, sep);
     });
