@@ -189,20 +189,26 @@ fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
     let num_threads = 10;
 
     scope(|s| {
-        let (sender, receiver) = bounded::<Msg>(num_threads);
-        let (send_result, receive_result) = bounded::<Msg>(num_threads);
         let (recycle_sender, recycle_receive) = bounded::<Msg>(num_threads);
 
+        let work_senders = vec!();
+        let result_receivers = vec!();
+
         for _ in 0..num_threads {
+            let (send_work, receive_work) = bounded::<Msg>(num_threads);
+            let (send_result, receive_result) = bounded::<Msg>(num_threads);
+            work_senders.push(send_work);
+            result_receivers.push(receive_result);
+
+            // NOTE maybe use twice as many as threads, to allow pre-work before queueing
+            //recycle_sender.send(Msg(vec!(), vec!())).unwrap();
             recycle_sender.send(Msg(vec!(), vec!())).unwrap();
 
-            let local_receiver = receiver.clone();
-            let local_send_result = send_result.clone();
             let local_f = f.clone();
             s.spawn(move |_| {
-                while let Ok(Msg(mut buffer, mut write_buffer)) = local_receiver.recv() {
+                while let Ok(Msg(mut buffer, mut write_buffer)) = receive_work.recv() {
                     local_f(&mut buffer[..], &mut write_buffer);
-                    let result = local_send_result.send(Msg(buffer, write_buffer));
+                    let result = send_result.send(Msg(buffer, write_buffer));
                     if !result.is_ok() {
                         break;
                     }
@@ -224,7 +230,7 @@ fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
                     buf.push(buffer[index]);
                 }
 
-                sender.send(Msg(buf, write_buf)).unwrap();
+                send_work.send(Msg(buf, write_buf)).unwrap();
 
                 num_bytes_read = input.read(&mut buffer).unwrap();
             }
