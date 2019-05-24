@@ -5,7 +5,6 @@ use std::io::{Write, Read, BufReader, BufWriter};
 use std::fs::OpenOptions;
 use std::path::Path;
 #[cfg(feature = "flame")]use std::fs::File;
-use std::sync::{Arc, Barrier};
 
 #[cfg(test)] use std::io::Cursor;
 #[cfg(feature = "flame")] use flame::*;
@@ -184,15 +183,13 @@ fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
     where R: Read + Sync + Send,
           W: Write + Sync + Send,
           F: Fn(&mut [u8], &mut Vec<u8>) + Sync {
-    let mut write_buffer: Vec<u8> = vec!();
-
     let num_threads = 10;
 
     scope(|s| {
         let (recycle_sender, recycle_receive) = bounded::<Msg>(num_threads);
 
-        let work_senders = vec!();
-        let result_receivers = vec!();
+        let mut work_senders = vec!();
+        let mut result_receivers = vec!();
 
         for _ in 0..num_threads {
             let (send_work, receive_work) = bounded::<Msg>(num_threads);
@@ -218,8 +215,9 @@ fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
 
         // spawn reader thread
         s.spawn(move |_| {
-            let mut num_bytes_read = 0;
+            let mut num_bytes_read;
             let mut buffer: Vec<u8> = vec!(0; READ_BUFFER_SIZE_BYTES);
+            let mut send_index = 0;
 
             num_bytes_read = input.read(&mut buffer).unwrap();
             while num_bytes_read > 0 {
@@ -230,14 +228,18 @@ fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
                     buf.push(buffer[index]);
                 }
 
-                send_work.send(Msg(buf, write_buf)).unwrap();
+                work_senders[send_index].send(Msg(buf, write_buf)).unwrap();
+                send_index = (send_index + 1) % num_threads;
 
                 num_bytes_read = input.read(&mut buffer).unwrap();
             }
         });
 
         s.spawn(move |_| {
-            while let Ok(Msg(buff, write_buff)) = receive_result.recv() {
+            let mut recv_index = 0;
+
+            while let Ok(Msg(buff, write_buff)) = result_receivers[recv_index].recv() {
+                recv_index = (recv_index + 1) % num_threads;
                 output.write(&write_buff).expect("Error writing to output!");
                 let result = recycle_sender.send(Msg(buff, write_buff));
                 if !result.is_ok() {
@@ -253,8 +255,6 @@ fn encode_buffer(buffer: &mut [u8], write_buffer: &mut Vec<u8>) {
     let mut byte: [u8; 1] = [0; 1];
 
     let mut next_index = 0;
-
-    let mut write_index: usize = 0;
 
     for byte_index in 0..buffer.len() {
         byte[0] = buffer[byte_index];
@@ -366,7 +366,6 @@ fn decode_buffer(buffer: &[u8],
                  prefix: Prefixed,
                  sep: &str) {
     let mut chars_in_line: usize = 0;
-    let mut write_index: usize = 0;
 
     let mut byte: [u8; 1] = [0; 1];
     let mut hex_bytes: [u8; 2] = [0; 2];
@@ -528,13 +527,13 @@ fn run(matches: ArgMatches) {
         Prefixed::NoPrefix
     };
 
-    let mut input_file = OpenOptions::new()
+    let input_file = OpenOptions::new()
                        .read(true)
                        .open(filename)
                        .expect("Could not open input file!");
     let mut input_file = BufReader::new(input_file);
 
-    let mut output_file = OpenOptions::new()
+    let output_file = OpenOptions::new()
                         .write(true)
                         .create(true)
                         .append(false)
