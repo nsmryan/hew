@@ -5,6 +5,7 @@ use std::fs::OpenOptions;
 use std::path::Path;
 
 #[cfg(test)] use std::io::Cursor;
+#[cfg(feature = "flame")] use flame::*;
 
 use clap::{App, Arg, ArgMatches};
 
@@ -170,34 +171,24 @@ fn byte_to_hex(byte: u8, case: Case) -> [char; 2] {
     hex_pair
 }
 
-fn buffered<R, W>(mut input: R, mut output: W, f: &Fn(&mut Vec<u8>, &mut Vec<u8>)) 
+fn buffered<R, W>(mut input: R, mut output: W, f: &Fn(&mut [u8], &mut Vec<u8>)) 
     where R: Read, 
           W: Write {
-    let mut hex_pair: [char; 2] = ['0'; 2];
-    let mut byte: [u8; 1] = [0; 1];
-
-    let mut next_index = 0;
-
-    let mut write_index: usize = 0;
-
     let mut buffer: Vec<u8> = vec!(0; READ_BUFFER_SIZE_BYTES);
-    let mut write_buffer: Vec<u8> = vec!(0; WRITE_BUFFER_SIZE_BYTES);
+    let mut write_buffer: Vec<u8> = vec!();
 
     while let Ok(num_bytes_read) = input.read(&mut buffer) {
         if num_bytes_read == 0 {
             break;
         }
 
-        f(&mut buffer, &mut write_buffer);
-        output.write(&write_buffer[0..write_index]).expect("Error writing to output!");
+        f(&mut buffer[0..num_bytes_read], &mut write_buffer);
+        output.write(&write_buffer).expect("Error writing to output!");
+        write_buffer.clear();
     }
-
-    f(&mut buffer, &mut write_buffer);
-    output.write(&write_buffer[0..write_index]).expect("Error flushing write buffer!");
 }
 
-
-fn encode<R: Read, W: Write>(mut input: R, mut output: W) {
+fn encode_buffer(buffer: &mut [u8], write_buffer: &mut Vec<u8>) {
     let mut hex_pair: [char; 2] = ['0'; 2];
     let mut byte: [u8; 1] = [0; 1];
 
@@ -205,38 +196,28 @@ fn encode<R: Read, W: Write>(mut input: R, mut output: W) {
 
     let mut write_index: usize = 0;
 
-    let mut buffer: [u8; READ_BUFFER_SIZE_BYTES] = [0; READ_BUFFER_SIZE_BYTES];
-    let mut write_buffer: [u8; WRITE_BUFFER_SIZE_BYTES] = [0; WRITE_BUFFER_SIZE_BYTES];
+    for byte_index in 0..buffer.len() {
+        byte[0] = buffer[byte_index];
 
-    while let Ok(num_bytes_read) = input.read(&mut buffer) {
-        if num_bytes_read == 0 {
-            break;
-        }
+        let chr = byte[0] as char;
+        if chr.is_ascii_hexdigit() {
+            hex_pair[next_index] = chr;
+            next_index = (next_index + 1) % 2;
 
-        for byte_index in 0..num_bytes_read {
-            byte[0] = buffer[byte_index];
-
-            let chr = byte[0] as char;
-            if chr.is_ascii_hexdigit() {
-                hex_pair[next_index] = chr;
-                next_index = (next_index + 1) % 2;
-
-                if (next_index % 2) == 0 {
-                    byte[0] = hex_to_byte(hex_pair);
-                    push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &byte[..]);
-                }
-            } else if next_index == 1 && 
-                      chr == 'x' &&
-                      hex_pair[0] == '0' {
-                next_index = 0;
+            if (next_index % 2) == 0 {
+                byte[0] = hex_to_byte(hex_pair);
+                write_buffer.push(byte[0]);
             }
+        } else if next_index == 1 && 
+                  chr == 'x' &&
+                  hex_pair[0] == '0' {
+            next_index = 0;
         }
-
-        output.write(&write_buffer).expect("Error writing buffer!");
     }
+}
 
-    // Write out remaining bytes of buffer
-    output.write(&write_buffer[0..write_index]).expect("Error flushing write buffer!");
+fn encode<R: Read, W: Write>(input: &mut R, output: &mut W) {
+    buffered(input, output, &encode_buffer);
 }
 
 #[test]
@@ -311,58 +292,59 @@ fn push_to_write_buffer<W: Write>(output: &mut W,
     }
 }
 
-fn decode<R: Read, W: Write>(mut input: R,
-                             mut output: W,
+fn decode<R: Read, W: Write>(input: &mut R,
+                             output: &mut W,
                              line_width: LineWidth,
                              word_width: WordWidth,
                              case: Case,
                              prefix: Prefixed,
                              sep: &str) {
+    buffered(input, output, &|input, out| {
+             decode_buffer(input, out, line_width, word_width, case, prefix, sep);
+    });
+}
+fn decode_buffer(buffer: &[u8],
+                 write_buffer: &mut Vec<u8>,
+                 line_width: LineWidth,
+                 word_width: WordWidth,
+                 case: Case,
+                 prefix: Prefixed,
+                 sep: &str) {
     let mut chars_in_line: usize = 0;
     let mut write_index: usize = 0;
 
     let mut byte: [u8; 1] = [0; 1];
     let mut hex_bytes: [u8; 2] = [0; 2];
 
-    let mut buffer: [u8; READ_BUFFER_SIZE_BYTES] = [0; READ_BUFFER_SIZE_BYTES];
-    let mut write_buffer: [u8; WRITE_BUFFER_SIZE_BYTES] = [0; WRITE_BUFFER_SIZE_BYTES];
+    for byte_index in 0..buffer.len() {
+        byte[0] = buffer[byte_index];
 
-    while let Ok(num_bytes_read) = input.read(&mut buffer) {
-        if num_bytes_read == 0 {
-            break;
+        if word_width.is_end_of_word(chars_in_line) && !(chars_in_line == 0) {
+            //push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, sep.as_bytes());
+            write_buffer.push(byte[0]);
         }
 
-        for byte_index in 0..num_bytes_read {
-            byte[0] = buffer[byte_index];
-
-            if word_width.is_end_of_word(chars_in_line) && !(chars_in_line == 0) {
-                push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, sep.as_bytes());
-            }
-
-            if (word_width.is_end_of_word(chars_in_line) || chars_in_line == 0) &&
-               prefix == Prefixed::HexPrefix {
-                push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &b"0x"[..]);
-            }
-
-            let hex_pair = byte_to_hex(byte[0], case);
-            hex_bytes[0] = hex_pair[0] as u8;
-            hex_bytes[1] = hex_pair[1] as u8;
-            push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &hex_bytes[..]);
-
-            chars_in_line += 1;
-
-
-            if line_width.is_end_of_line(chars_in_line) {
-                push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &b"\n"[..]);
-                chars_in_line = 0;
-            }
+        if (word_width.is_end_of_word(chars_in_line) || chars_in_line == 0) &&
+           prefix == Prefixed::HexPrefix {
+            //push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &b"0x"[..]);
+            write_buffer.push(byte[0]);
         }
 
-        output.write(&write_buffer).expect("Error writing buffer!");
+        let hex_pair = byte_to_hex(byte[0], case);
+        hex_bytes[0] = hex_pair[0] as u8;
+        hex_bytes[1] = hex_pair[1] as u8;
+        //push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &hex_bytes[..]);
+        write_buffer.push(byte[0]);
+
+        chars_in_line += 1;
+
+
+        if line_width.is_end_of_line(chars_in_line) {
+            //push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &b"\n"[..]);
+            write_buffer.push('\n' as u8);
+            chars_in_line = 0;
+        }
     }
-
-    // Write out remaining bytes of buffer
-    output.write(&write_buffer[0..write_index]).expect("Error flushing write buffer!");
 }
 
 #[test]
@@ -488,13 +470,13 @@ fn run(matches: ArgMatches) {
         Prefixed::NoPrefix
     };
 
-    let input_file = OpenOptions::new()
+    let mut input_file = OpenOptions::new()
                        .read(true)
                        .open(filename)
                        .expect("Could not open input file!");
-    let input_file = BufReader::new(input_file);
+    let mut input_file = BufReader::new(input_file);
 
-    let output_file = OpenOptions::new()
+    let mut output_file = OpenOptions::new()
                         .write(true)
                         .create(true)
                         .append(false)
@@ -502,15 +484,15 @@ fn run(matches: ArgMatches) {
                         .open(outfilename)
                         .expect("Could not open output file!");
 
-    let output_file = BufWriter::new(output_file);
+    let mut output_file = BufWriter::new(output_file);
 
     match mode {
         Mode::Hex => {
-            decode(input_file, output_file, width, word_width, case, prefix, sep);
+            decode(&mut input_file, &mut output_file, width, word_width, case, prefix, sep);
         }
 
         Mode::Bin => {
-            encode(input_file, output_file);
+            encode(&mut input_file, &mut output_file);
         }
     }
 }
