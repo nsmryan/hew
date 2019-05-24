@@ -13,6 +13,7 @@ repository = "https://github.com/nsmryan/hew"
 clap = "2.32.0"
 flame = { version = "0.2", optional = true }
 crossbeam = "0.7"
+num_cpus = "1.0"
 
 [dev-dependencies]
 quickcheck = "0.6"

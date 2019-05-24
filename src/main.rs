@@ -1,5 +1,6 @@
 extern crate clap;
 extern crate crossbeam;
+extern crate num_cpus;
 
 use std::io::{Write, Read, BufReader, BufWriter};
 use std::fs::OpenOptions;
@@ -15,8 +16,7 @@ use crossbeam::channel::*;
 use clap::{App, Arg, ArgMatches};
 
 
-const WRITE_BUFFER_SIZE_BYTES: usize =  1024*16;
-const READ_BUFFER_SIZE_BYTES: usize =  1024*128;
+const BUFFER_SIZE_BYTES: usize =  1024*128;
 
 const NIBBLE_TO_HEX_UPPER: [char; 16] =
     ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'A', 'B', 'C', 'D', 'E', 'F'];
@@ -79,6 +79,9 @@ enum Case {
 
 
 fn main() {
+    let buff_size_str = BUFFER_SIZE_BYTES.to_string();
+    let num_cpus_str = num_cpus::get().to_string();
+
     let matches = App::new("hew")
         .version("0.2")
         .author("Noah Ryan")
@@ -121,6 +124,18 @@ fn main() {
                   .short("s")
                   .long("sep")
                   .default_value(" ")
+                  .required(false))
+        .arg(Arg::with_name("BUFFERSIZE")
+                  .help("Chunk size in bytes")
+                  .short("b")
+                  .long("buffer")
+                  .default_value(&buff_size_str)
+                  .required(false))
+        .arg(Arg::with_name("THREADS")
+                  .help("Number of threads to spawn")
+                  .short("t")
+                  .long("threads")
+                  .default_value(&num_cpus_str)
                   .required(false))
         .arg(Arg::with_name("LOWER")
                   .help("Print hex in lowercase (default is UPPERCASE)")
@@ -179,11 +194,10 @@ fn byte_to_hex(byte: u8, case: Case) -> [char; 2] {
     hex_pair
 }
 
-fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
+fn buffered<R, W, F>(mut input: R, mut output: W, buf_size: usize, num_threads: usize, f: &F)
     where R: Read + Sync + Send,
           W: Write + Sync + Send,
           F: Fn(&mut [u8], &mut Vec<u8>) + Sync {
-    let num_threads = 10;
 
     scope(|s| {
         let (recycle_sender, recycle_receive) = bounded::<Msg>(num_threads);
@@ -197,8 +211,6 @@ fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
             work_senders.push(send_work);
             result_receivers.push(receive_result);
 
-            // NOTE maybe use twice as many as threads, to allow pre-work before queueing
-            //recycle_sender.send(Msg(vec!(), vec!())).unwrap();
             recycle_sender.send(Msg(vec!(), vec!())).unwrap();
 
             let local_f = f.clone();
@@ -216,7 +228,7 @@ fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
         // spawn reader thread
         s.spawn(move |_| {
             let mut num_bytes_read;
-            let mut buffer: Vec<u8> = vec!(0; READ_BUFFER_SIZE_BYTES);
+            let mut buffer: Vec<u8> = vec!(0; buf_size);
             let mut send_index = 0;
 
             num_bytes_read = input.read(&mut buffer).unwrap();
@@ -276,11 +288,11 @@ fn encode_buffer(buffer: &mut [u8], write_buffer: &mut Vec<u8>) {
     }
 }
 
-fn encode<R, W>(input: &mut R, output: &mut W) 
+fn encode<R, W>(input: &mut R, output: &mut W, buf_size: usize, num_threads: usize)
     where R: Read + Sync + Send,
           W: Write + Sync + Send {
 
-    buffered(input, output, &encode_buffer);
+    buffered(input, output, buf_size, num_threads, &encode_buffer);
 }
 
 #[test]
@@ -346,6 +358,8 @@ fn test_encode_empty() {
 
 fn decode<R, W>(input: &mut R,
                 output: &mut W,
+                buf_size: usize,
+                num_threads: usize,
                 line_width: LineWidth,
                 word_width: WordWidth,
                 case: Case,
@@ -353,7 +367,7 @@ fn decode<R, W>(input: &mut R,
                 sep: &str) 
     where R: Read + Sync + Send,
           W: Write + Sync + Send {
-    buffered(input, output, &|input, out| {
+    buffered(input, output, buf_size, num_threads, &|input, out| {
              decode_buffer(input, out, line_width, word_width, case, prefix, sep);
     });
 }
@@ -515,6 +529,9 @@ fn run(matches: ArgMatches) {
         std::process::exit(1);
     }
 
+    let buf_size = matches.value_of("BUFFERSIZE").unwrap().parse().unwrap();
+    let num_threads = matches.value_of("THREADS").unwrap().parse().unwrap();
+
     let case = if matches.is_present("LOWER") {
         Case::Lower
     } else {
@@ -546,11 +563,11 @@ fn run(matches: ArgMatches) {
 
     match mode {
         Mode::Hex => {
-            decode(&mut input_file, &mut output_file, width, word_width, case, prefix, sep);
+            decode(&mut input_file, &mut output_file, buf_size, num_threads, width, word_width, case, prefix, sep);
         }
 
         Mode::Bin => {
-            encode(&mut input_file, &mut output_file);
+            encode(&mut input_file, &mut output_file, buf_size, num_threads);
         }
     }
 
