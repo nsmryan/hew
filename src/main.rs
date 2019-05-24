@@ -328,21 +328,6 @@ fn test_encode_empty() {
     assert_eq!(output, vec!());
 }
 
-fn push_to_write_buffer<W: Write>(output: &mut W,
-                                  write_buffer: &mut [u8],
-                                  write_index: &mut usize,
-                                  bytes: &[u8]) {
-    for index in 0..bytes.len() {
-        if *write_index == write_buffer.len() {
-            output.write(write_buffer).expect("Error writing to output!");
-            *write_index = 0;
-        }
-
-        write_buffer[*write_index] = bytes[index];
-        *write_index += 1;
-    }
-}
-
 fn decode<R: Read + Sync + Send, W: Write>(input: &mut R,
                              output: &mut W,
                              line_width: LineWidth,
@@ -372,23 +357,23 @@ fn decode_buffer(buffer: &[u8],
         byte[0] = buffer[byte_index];
 
         if word_width.is_end_of_word(chars_in_line) && !(chars_in_line == 0) {
-            write_buffer.push(byte[0]);
+            write_buffer.extend_from_slice(sep.as_bytes());
         }
 
         if (word_width.is_end_of_word(chars_in_line) || chars_in_line == 0) &&
            prefix == Prefixed::HexPrefix {
-            write_buffer.push(byte[0]);
+            write_buffer.extend_from_slice(&b"0x"[..]);
         }
 
         let hex_pair = byte_to_hex(byte[0], case);
         hex_bytes[0] = hex_pair[0] as u8;
         hex_bytes[1] = hex_pair[1] as u8;
-        write_buffer.push(byte[0]);
+        write_buffer.extend_from_slice(&hex_bytes[..]);
 
         chars_in_line += 1;
 
         if line_width.is_end_of_line(chars_in_line) {
-            write_buffer.push('\n' as u8);
+            write_buffer.extend_from_slice(&b"\n"[..]);
             chars_in_line = 0;
         }
     }
