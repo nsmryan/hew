@@ -3,6 +3,7 @@ extern crate clap;
 use std::io::{Write, Read, BufReader, BufWriter};
 use std::fs::OpenOptions;
 use std::path::Path;
+#[cfg(feature = "flame")]use std::fs::File;
 
 #[cfg(test)] use std::io::Cursor;
 #[cfg(feature = "flame")] use flame::*;
@@ -177,15 +178,26 @@ fn buffered<R, W>(mut input: R, mut output: W, f: &Fn(&mut [u8], &mut Vec<u8>))
     let mut buffer: Vec<u8> = vec!(0; READ_BUFFER_SIZE_BYTES);
     let mut write_buffer: Vec<u8> = vec!();
 
+    #[cfg(feature = "flame")]flame::start_guard("buffered");
+    #[cfg(feature = "flame")]flame::start("read");
     while let Ok(num_bytes_read) = input.read(&mut buffer) {
         if num_bytes_read == 0 {
             break;
         }
+        #[cfg(feature = "flame")]flame::end("read");
 
+        #[cfg(feature = "flame")]flame::start("process");
         f(&mut buffer[0..num_bytes_read], &mut write_buffer);
+        #[cfg(feature = "flame")]flame::end("process");
+        #[cfg(feature = "flame")]flame::start("write");
         output.write(&write_buffer).expect("Error writing to output!");
+        #[cfg(feature = "flame")]flame::end("write");
         write_buffer.clear();
+
+        #[cfg(feature = "flame")]flame::start("read");
     }
+
+    #[cfg(feature = "flame")]flame::end("read");
 }
 
 fn encode_buffer(buffer: &mut [u8], write_buffer: &mut Vec<u8>) {
@@ -320,27 +332,22 @@ fn decode_buffer(buffer: &[u8],
         byte[0] = buffer[byte_index];
 
         if word_width.is_end_of_word(chars_in_line) && !(chars_in_line == 0) {
-            //push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, sep.as_bytes());
             write_buffer.push(byte[0]);
         }
 
         if (word_width.is_end_of_word(chars_in_line) || chars_in_line == 0) &&
            prefix == Prefixed::HexPrefix {
-            //push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &b"0x"[..]);
             write_buffer.push(byte[0]);
         }
 
         let hex_pair = byte_to_hex(byte[0], case);
         hex_bytes[0] = hex_pair[0] as u8;
         hex_bytes[1] = hex_pair[1] as u8;
-        //push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &hex_bytes[..]);
         write_buffer.push(byte[0]);
 
         chars_in_line += 1;
 
-
         if line_width.is_end_of_line(chars_in_line) {
-            //push_to_write_buffer(&mut output, &mut write_buffer, &mut write_index, &b"\n"[..]);
             write_buffer.push('\n' as u8);
             chars_in_line = 0;
         }
@@ -486,6 +493,7 @@ fn run(matches: ArgMatches) {
 
     let mut output_file = BufWriter::new(output_file);
 
+
     match mode {
         Mode::Hex => {
             decode(&mut input_file, &mut output_file, width, word_width, case, prefix, sep);
@@ -495,4 +503,6 @@ fn run(matches: ArgMatches) {
             encode(&mut input_file, &mut output_file);
         }
     }
+
+    flame::dump_html(&mut File::create("flame-graph.html").unwrap()).unwrap();
 }
