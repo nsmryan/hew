@@ -1,4 +1,5 @@
 extern crate clap;
+extern crate crossbeam;
 
 use std::io::{Write, Read, BufReader, BufWriter};
 use std::fs::OpenOptions;
@@ -7,6 +8,9 @@ use std::path::Path;
 
 #[cfg(test)] use std::io::Cursor;
 #[cfg(feature = "flame")] use flame::*;
+
+use crossbeam::thread::*;
+use crossbeam::channel::*;
 
 use clap::{App, Arg, ArgMatches};
 
@@ -19,6 +23,12 @@ const NIBBLE_TO_HEX_UPPER: [char; 16] =
 
 const NIBBLE_TO_HEX_LOWER: [char; 16] =
     ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'];
+
+#[derive(Clone, PartialEq)]
+enum Msg {
+    Work(Vec<u8>, Vec<u8>),
+    NoWork,
+}
 
 #[derive(Copy, Clone, PartialEq)]
 enum LineWidth {
@@ -172,32 +182,94 @@ fn byte_to_hex(byte: u8, case: Case) -> [char; 2] {
     hex_pair
 }
 
-fn buffered<R, W>(mut input: R, mut output: W, f: &Fn(&mut [u8], &mut Vec<u8>)) 
-    where R: Read, 
-          W: Write {
-    let mut buffer: Vec<u8> = vec!(0; READ_BUFFER_SIZE_BYTES);
+fn buffered<R, W, F>(mut input: R, mut output: W, f: &F)
+    where R: Read + Sync + Send,
+          W: Write,
+          F: Fn(&mut [u8], &mut Vec<u8>) + Sync {
     let mut write_buffer: Vec<u8> = vec!();
 
-    #[cfg(feature = "flame")]flame::start_guard("buffered");
-    #[cfg(feature = "flame")]flame::start("read");
-    while let Ok(num_bytes_read) = input.read(&mut buffer) {
-        if num_bytes_read == 0 {
-            break;
+    let num_threads = 10;
+
+    scope(|s| {
+        let (sender, receiver) = bounded::<Msg>(num_threads);
+        let (send_result, receive_result) = bounded::<Msg>(num_threads);
+        let (recycle_sender, recycle_receive) = bounded::<Msg>(num_threads);
+
+        for _ in 0..num_threads {
+            recycle_sender.send(Msg::Work(vec!(), vec!())).unwrap();
+
+            let local_receiver = receiver.clone();
+            let local_send_result = send_result.clone();
+            let local_f = f.clone();
+            s.spawn(move |_| {
+                while let Ok(msg) = local_receiver.recv() {
+                    match msg {
+
+                      Msg::Work(mut buffer, mut write_buffer) => {
+                        local_f(&mut buffer[..], &mut write_buffer);
+                        let result = local_send_result.send(Msg::Work(buffer, write_buffer));
+                        if !result.is_ok() {
+                            break;
+                        }
+                      },
+
+                      Msg::NoWork => {
+                          break;
+                        },
+                    }
+                }
+                local_send_result.send(Msg::NoWork);
+            });
         }
-        #[cfg(feature = "flame")]flame::end("read");
 
-        #[cfg(feature = "flame")]flame::start("process");
-        f(&mut buffer[0..num_bytes_read], &mut write_buffer);
-        #[cfg(feature = "flame")]flame::end("process");
-        #[cfg(feature = "flame")]flame::start("write");
-        output.write(&write_buffer).expect("Error writing to output!");
-        #[cfg(feature = "flame")]flame::end("write");
-        write_buffer.clear();
+        // spawn reader thread
+        s.spawn(move |_| {
+            let mut num_bytes_read = 0;
+            let mut buffer: Vec<u8> = vec!(0; READ_BUFFER_SIZE_BYTES);
 
-        #[cfg(feature = "flame")]flame::start("read");
-    }
+            num_bytes_read = input.read(&mut buffer).unwrap();
+            while num_bytes_read > 0 {
+                let msg = recycle_receive.recv().unwrap();
+                match msg {
+                    Msg::Work(mut buf, mut write_buf) => {
+                        buf.clear();
+                        write_buf.clear();
+                        for index in 0..buffer.len() {
+                            buf.push(buffer[index]);
+                        }
 
-    #[cfg(feature = "flame")]flame::end("read");
+                        sender.send(Msg::Work(buf, write_buf)).unwrap();
+                    },
+
+                    Msg::NoWork => {
+                        break;
+                    },
+                }
+
+                num_bytes_read = input.read(&mut buffer).unwrap();
+            }
+
+            for _ in 0..num_threads {
+                sender.send(Msg::NoWork).unwrap();
+            }
+        });
+
+        while let Ok(msg) = receive_result.recv() {
+            match msg {
+                Msg::Work(buff, write_buff) => {
+                    output.write(&write_buff).expect("Error writing to output!");
+                    let result = recycle_sender.send(Msg::Work(buff, write_buff));
+                    if !result.is_ok() {
+                        break;
+                    }
+                }
+
+                Msg::NoWork => {
+                    break;
+                }
+            }
+        }
+    }).unwrap();
 }
 
 fn encode_buffer(buffer: &mut [u8], write_buffer: &mut Vec<u8>) {
@@ -228,7 +300,7 @@ fn encode_buffer(buffer: &mut [u8], write_buffer: &mut Vec<u8>) {
     }
 }
 
-fn encode<R: Read, W: Write>(input: &mut R, output: &mut W) {
+fn encode<R: Read + Sync + Send, W: Write>(input: &mut R, output: &mut W) {
     buffered(input, output, &encode_buffer);
 }
 
@@ -304,7 +376,7 @@ fn push_to_write_buffer<W: Write>(output: &mut W,
     }
 }
 
-fn decode<R: Read, W: Write>(input: &mut R,
+fn decode<R: Read + Sync + Send, W: Write>(input: &mut R,
                              output: &mut W,
                              line_width: LineWidth,
                              word_width: WordWidth,
@@ -504,5 +576,5 @@ fn run(matches: ArgMatches) {
         }
     }
 
-    flame::dump_html(&mut File::create("flame-graph.html").unwrap()).unwrap();
+    #[cfg(feature = "flame")]flame::dump_html(&mut File::create("flame-graph.html").unwrap()).unwrap();
 }
